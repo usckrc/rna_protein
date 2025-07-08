@@ -1,0 +1,210 @@
+---
+title: "FCG/RPC Plots"
+author: "Sienna Blanche"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    number_sections: no
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages 
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("devtools")) {install.packages("devtools"); require("devtools")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("sjmisc")) {install.packages("sjmisc"); require("sjmisc")}
+if (!require("gridExtra")) {install.packages("gridExtra"); require("gridExtra")}
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("pheatmap")) {install.packages("pheatmap"); require("pheatmap")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("viridis")) {install.packages("viridis"); require("viridis")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("tibble")) {install.packages("tibble"); require("tibble")}
+
+set.seed((12345))
+here()
+```
+
+# Load Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#Load the RPC dataset
+RPC <- readRDS(here("Dataset", "RNA-Protein.rds"))
+
+# load FCG dataset
+FCG <- readRDS(here("Dataset", "FCG.RDS"))
+```
+
+# Merge dataframes
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+merged_df <- full_join(RPC, FCG, by = "Gene")
+```
+
+# Assessing Correlation
+
+## WT/KO vs MXY/FXY
+
+### Correlation Coeffiecent 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# filter dfs
+filtered_WT_MXY <- merged_df %>% 
+  filter(Metric.y == "MXY vs FXY", Metric.x == "WT vs KO")
+
+## spearman
+cor_result_spearman_WT_MXY <- cor.test(filtered_WT_MXY$abs_diff_ko, filtered_WT_MXY$`Sum Deltas`, method = "spearman")
+
+corr_coeff_spearman_WT_MXY <- cor_result_spearman_WT_MXY$estimate
+corr_pvalue_spearman_WT_MXY <- cor_result_spearman_WT_MXY$p.value
+
+## pearson
+cor_result_pearson_WT_MXY <- cor.test(filtered_WT_MXY$abs_diff_ko, filtered_WT_MXY$`Sum Deltas`, method = "pearson")
+
+corr_coeff_pearson_WT_MXY <- cor_result_pearson_WT_MXY$estimate
+corr_pvalue_pearson_WT_MXY <- cor_result_pearson_WT_MXY$p.value
+```
+
+### Visualizing Correlation 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# spearman plot
+ggplot(filtered_WT_MXY,aes(x = abs_diff_ko, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ MXYvFXY",
+    y = "Δ WTvKO",
+    title = "Spearman's Correlation between the change in WTvKO and MXYvFXY"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXY$abs_diff_ko, na.rm = TRUE), 
+           y = min(filtered_WT_MXY$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_spearman_WT_MXY, 2), "\n", "p-value =", round(corr_pvalue_spearman_WT_MXY, 2)),
+           hjust = 1, vjust = -8, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+
+# pearson plot
+ggplot(filtered_WT_MXY,aes(x = abs_diff_ko, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ MXYvFXY",
+    y = "Δ WTvKO",
+    title = "Pearson's Correlation between the change in WTvKO and MXYvFXY"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXY$abs_diff_ko, na.rm = TRUE), 
+           y = min(filtered_WT_MXY$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_pearson_WT_MXY, 2), "\n", "p-value =", round(corr_pvalue_pearson_WT_MXY, 2)),
+           hjust = 1, vjust = -8, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+```
+
+## WT/WT+A vs MXX/FXX
+
+### Correlation Coeffiecent 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# filter dfs
+filtered_WT_MXX <- merged_df %>% 
+  filter(Metric.y == "MXX vs FXX", Metric.x == "WT vs WT+A")
+
+## spearman
+cor_result_spearman_WT_MXX <- cor.test(filtered_WT_MXX$abs_diff_wt_a, filtered_WT_MXX$`Sum Deltas`, method = "spearman")
+
+corr_coeff_spearman_WT_MXX <- cor_result_spearman_WT_MXX$estimate
+corr_pvalue_spearman_WT_MXX <- cor_result_spearman_WT_MXX$p.value
+
+## pearson
+cor_result_pearson_WT_MXX <- cor.test(filtered_WT_MXX$abs_diff_wt_a, filtered_WT_MXX$`Sum Deltas`, method = "pearson")
+
+corr_coeff_pearson_WT_MXX <- cor_result_pearson_WT_MXX$estimate
+corr_pvalue_pearson_WT_MXX <- cor_result_pearson_WT_MXX$p.value
+```
+
+### Visualizing Correlation 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# spearman plot
+ggplot(filtered_WT_MXX,aes(x = abs_diff_wt_a, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ MXXvFXX",
+    y = "Δ WTvWT+A",
+    title = "Spearman's Correlation between the change in WTvWT+A and MXXvFXX"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXX$abs_diff_wt_a, na.rm = TRUE), 
+           y = min(filtered_WT_MXX$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_spearman_WT_MXX, 2), "\n", "p-value =", round(corr_pvalue_spearman_WT_MXX, 2)),
+           hjust = 1, vjust = -1.5, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+
+# pearson plot
+ggplot(filtered_WT_MXX,aes(x = abs_diff_wt_a, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ MXXvFXX",
+    y = "Δ WTvWT+A",
+    title = "Pearson's Correlation between the change in WTvWT+A and MXXvFXX"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXX$abs_diff_wt_a, na.rm = TRUE), 
+           y = min(filtered_WT_MXX$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_pearson_WT_MXX, 2), "\n", "p-value =", round(corr_pvalue_pearson_WT_MXX, 2)),
+           hjust = 1, vjust = -1.5, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+```
+
+
+# Session Info
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+ 
+sessionInfo()
+```

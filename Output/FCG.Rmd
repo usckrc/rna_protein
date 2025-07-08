@@ -1,0 +1,1258 @@
+---
+title: "FCG Proj"
+author: "Sienna Blanche"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    number_sections: no
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages 
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("devtools")) {install.packages("devtools"); require("devtools")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("sjmisc")) {install.packages("sjmisc"); require("sjmisc")}
+if (!require("gridExtra")) {install.packages("gridExtra"); require("gridExtra")}
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("pheatmap")) {install.packages("pheatmap"); require("pheatmap")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("viridis")) {install.packages("viridis"); require("viridis")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("tibble")) {install.packages("tibble"); require("tibble")}
+
+set.seed((12345))
+here()
+```
+
+# Project Narritive 
+
+## Narritive of Workflow
+
+1. 
+
+## Important Notes
+
+## Interpretation
+
+# Load Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#Load the PB dataset
+load(here("Dataset", "ATAC_Pseudobulk_cell_group.rds"))
+
+load(here("Dataset", "ATAC_Pseudobulk_cell.rds"))
+
+load(here("Dataset", "ATAC_Pseudobulk_group.rds"))
+
+# load xlsx dataset
+Protein_FXYvFXX <- read_excel("Dataset/FXYvFXX copy.xlsx")
+Protein_MXXvFXX <- read_excel("Dataset/MXXvFXX copy.xlsx")
+Protein_MXYvFXX <- read_excel("Dataset/MXYvFXX copy .xlsx")
+Protein_MXYvFXY <- read_excel("Dataset/MXYvFXY copy .xlsx")
+Protein_MXYvMXX <- read_excel("Dataset/MXYvMXX copy.xlsx")
+```
+
+# Visualize Genes of Interest
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# gene list
+gene_name <- unique(unlist(Protein_FXYvFXX$Gene))
+
+#loop that makes a box plot of the expression of each gene in every cell population
+  for (i in gene_name) {
+  # Extract the specified column along with rownames
+  if (i %in% colnames(Pseudobulk.cell)) {
+    selected_column <- Pseudobulk.cell[, i, drop = FALSE]
+    
+    # Save the results to a data frame with rownames
+    result_df <- data.frame(RowName = rownames(selected_column), Value = selected_column[, 1])
+    
+    # Ensure the RowName factor levels are consistent
+    result_df$RowName <- factor(result_df$RowName, levels = c("PT-S1", "PT-S2-f/mKO", "PT-S2-mWT", "PT-S3-f/mKO", "PT-S3-mWT",  "LOH", "TAL", "DCT","PC", "IC-A", "IC-B", "Vascular", "Interstitial", "Immune", "Pod", "PEC"))
+    
+    # Create a box plot of result_df
+    f1 <- ggplot(result_df, aes(x = RowName, y = Value)) + 
+      geom_boxplot() + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      labs(title = i, x = "Cell Type", y = "Expression")
+  } else {
+    # Create a placeholder plot indicating the gene was not found
+    f1 <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = paste("Gene", i, "not found in data frame"), size = 5, color = "red") + 
+      theme_void() + 
+      labs(title = i)
+  }
+
+  # Print plots
+  print(f1)
+}
+```
+
+The genes Umod, Kcnj10, Scnn1b, Cldn7, Cldn8, Kcnj1, Aqp3, Aqp4, Atp6v1b1, Sgk1, Trpv4, and Slc26a4 are expressed in both the cortex and the medulla however, we are unable to calculate a ratio between cortex and medulla for these genes at this time to normalize. 
+
+# Cleaning the Protein data
+
+## Step 1: Clean the raw data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#clean raw protein data
+# List of data frames
+protein_dfs <- list(Protein_FXYvFXX, Protein_MXXvFXX, Protein_MXYvFXX, Protein_MXYvFXY, Protein_MXYvMXX)
+
+# Names for each cleaned dataframe
+protein_names <- c("Protein_FXYvFXX_1", "Protein_MXXvFXX_1", "Protein_MXYvFXX_1", "Protein_MXYvFXY_1", "Protein_MXYvMXX_1")
+
+# Initialize an empty list to store the cleaned data frames
+cleaned_protein_dfs <- list()
+
+# For loop to clean each data frame
+for (i in seq_along(protein_dfs)) {
+  cleaned_protein_dfs[[protein_names[i]]] <- protein_dfs[[i]] %>%
+    select("Gene", "Protein", matches("MXY", ignore.case = TRUE), matches("MXX", ignore.case = TRUE), matches("FXX", ignore.case = TRUE), matches("FXY", ignore.case = TRUE), "Difference")
+}
+
+# Access cleaned dataframe
+Protein_FXYvFXX_1 <- cleaned_protein_dfs$Protein_FXYvFXX_1
+Protein_MXXvFXX_1 <- cleaned_protein_dfs$Protein_MXXvFXX_1
+Protein_MXYvFXX_1 <- cleaned_protein_dfs$Protein_MXYvFXX_1
+Protein_MXYvFXY_1 <- cleaned_protein_dfs$Protein_MXYvFXY_1
+Protein_MXYvMXX_1 <- cleaned_protein_dfs$Protein_MXYvMXX_1
+
+head(Protein_FXYvFXX_1)
+```
+
+This is the cleaned version of the raw data.
+
+## Step 2: Calculate the average for proteins with multiple measurements
+
+### FXYvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+ 
+# Subset for 'FL' and 'CL' suffixed proteins
+suffix_data_FXYvFXX <- Protein_FXYvFXX_1 %>%
+  filter(grepl("-FL$|-Cl$", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("-?FL$|-?Cl$", "", Protein),  # Create base protein name
+    Suffix = ifelse(grepl("FL$|-FL$", Protein), "FL", "Cl") # Identify whether the protein has FL or Cl suffix
+  )
+
+# Separate 'FL' and 'CL' data
+fl_data_FXYvFXX <- suffix_data_FXYvFXX %>% filter(Suffix == "FL")
+cl_data_FXYvFXX <- suffix_data_FXYvFXX %>% filter(Suffix == "Cl")
+
+# Join 'FL' and 'Cl' datasets by ProteinBase and Gene
+combined_suffix_FXYvFXX <- full_join(fl_data_FXYvFXX, cl_data_FXYvFXX, by = c("ProteinBase", "Gene"), suffix = c("_FL", "_Cl"))
+
+# Calculate unweighted average between FL and Cl values
+Protein_FXYvFXX_uw_avg <- combined_suffix_FXYvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of FXX` = mean(c(`Mean of FXX_FL`, `Mean of FXX_Cl`), na.rm = TRUE),
+    `Mean of FXY` = mean(c(`Mean of FXY_FL`, `Mean of FXY_Cl`), na.rm = TRUE),
+    Difference = `Mean of FXY` - `Mean of FXX`
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of FXY`, `Mean of FXX`, Difference)%>%
+  rename(Protein = ProteinBase)
+  
+# Replace original rows with calculated means
+# Perform the join
+Protein_FXYvFXX_2 <- Protein_FXYvFXX_1 %>%
+  left_join(Protein_FXYvFXX_uw_avg, by = c("Gene")) %>%
+  rowwise() %>%
+  mutate(
+    `Mean of FXX` = coalesce(`Mean of FXX.y`, `Mean of FXX.x`),
+    `Mean of FXY` = coalesce(`Mean of FXY.y`, `Mean of FXY.x`),
+    Difference = coalesce(Difference.y, Difference.x),
+    Protein = coalesce(Protein.y, Protein.x),
+    ) %>%
+  ungroup() %>%
+  select(Protein, Gene, `Mean of FXY`, `Mean of FXX`, Difference) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) %>%
+  mutate_if(is.numeric, round, 3)
+
+# merge back to og df
+head(Protein_FXYvFXX_2)
+```
+
+### MXXvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+ 
+# Subset for 'FL' and 'CL' suffixed proteins
+suffix_data_MXXvFXX <- Protein_MXXvFXX_1 %>%
+  filter(grepl("-FL$|-Cl$", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("-?FL$|-?Cl$", "", Protein),  # Create base protein name
+    Suffix = ifelse(grepl("FL$|-FL$", Protein), "FL", "Cl") # Identify whether the protein has FL or Cl suffix
+  )
+
+# Separate 'FL' and 'CL' data
+fl_data_MXXvFXX <- suffix_data_MXXvFXX %>% filter(Suffix == "FL")
+cl_data_MXXvFXX <- suffix_data_MXXvFXX %>% filter(Suffix == "Cl")
+
+# Join 'FL' and 'Cl' datasets by ProteinBase and Gene
+combined_suffix_MXXvFXX <- full_join(fl_data_MXXvFXX, cl_data_MXXvFXX, by = c("ProteinBase", "Gene"), suffix = c("_FL", "_Cl"))
+
+# Calculate unweighted average between FL and Cl values
+Protein_MXXvFXX_uw_avg <- combined_suffix_MXXvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXX` = mean(c(`Mean of MXX_FL`, `Mean of MXX_Cl`), na.rm = TRUE),
+    `Mean of FXX` = mean(c(`Mean of FXX_FL`, `Mean of FXX_Cl`), na.rm = TRUE),
+    Difference = `Mean of MXX` - `Mean of FXX`
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXX`, `Mean of FXX`, Difference)%>%
+  rename(Protein = ProteinBase)
+  
+# Replace original rows with calculated means
+# Perform the join
+Protein_MXXvFXX_2 <- Protein_MXXvFXX_1 %>%
+  left_join(Protein_MXXvFXX_uw_avg, by = c("Gene")) %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXX` = coalesce(`Mean of MXX.y`, `Mean of MXX.x`),
+    `Mean of FXX` = coalesce(`Mean of FXX.y`, `Mean of FXX.x`),
+    Difference = coalesce(Difference.y, Difference.x),
+    Protein = coalesce(Protein.y, Protein.x),
+    ) %>%
+  ungroup() %>%
+  select(Protein, Gene, `Mean of MXX`, `Mean of FXX`, Difference) %>%
+  mutate(Protein = sub(" - .*", "", Protein)) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) %>%
+  mutate_if(is.numeric, round, 3) 
+
+# merge back to og df
+head(Protein_MXXvFXX_2)
+```
+
+### MXYvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+ 
+# Subset for 'FL' and 'CL' suffixed proteins
+suffix_data_MXYvFXX <- Protein_MXYvFXX_1 %>%
+  filter(grepl("-FL$|-Cl$", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("-?FL$|-?Cl$", "", Protein),  # Create base protein name
+    Suffix = ifelse(grepl("FL$|-FL$", Protein), "FL", "Cl") # Identify whether the protein has FL or Cl suffix
+  )
+
+# Separate 'FL' and 'CL' data
+fl_data_MXYvFXX <- suffix_data_MXYvFXX %>% filter(Suffix == "FL")
+cl_data_MXYvFXX <- suffix_data_MXYvFXX %>% filter(Suffix == "Cl")
+
+# Join 'FL' and 'Cl' datasets by ProteinBase and Gene
+combined_suffix_MXYvFXX <- full_join(fl_data_MXYvFXX, cl_data_MXYvFXX, by = c("ProteinBase", "Gene"), suffix = c("_FL", "_Cl"))
+
+# Calculate unweighted average between FL and Cl values
+Protein_MXYvFXX_uw_avg <- combined_suffix_MXYvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = mean(c(`Mean of MXY_FL`, `Mean of MXY_Cl`), na.rm = TRUE),
+    `Mean of FXX` = mean(c(`Mean of FXX_FL`, `Mean of FXX_Cl`), na.rm = TRUE),
+    Difference = `Mean of MXY` - `Mean of FXX`
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of FXX`, Difference)%>%
+  rename(Protein = ProteinBase)
+  
+# Replace original rows with calculated means
+# Perform the join
+Protein_MXYvFXX_2 <- Protein_MXYvFXX_1 %>%
+  left_join(Protein_MXYvFXX_uw_avg, by = c("Gene")) %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = coalesce(`Mean of MXY.y`, `Mean of MXY.x`),
+    `Mean of FXX` = coalesce(`Mean of FXX.y`, `Mean of FXX.x`),
+    Difference = coalesce(Difference.y, Difference.x),
+    Protein = coalesce(Protein.y, Protein.x),
+    ) %>%
+  ungroup() %>%
+  select(Protein, Gene, `Mean of MXY`, `Mean of FXX`, Difference) %>%
+  mutate(Protein = sub(" - .*", "", Protein)) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) %>%
+  mutate_if(is.numeric, round, 3)
+
+# merge back to og df
+head(Protein_MXYvFXX_2)
+```
+
+### MXYvFXY
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+ 
+# Subset for 'FL' and 'CL' suffixed proteins
+suffix_data_MXYvFXY <- Protein_MXYvFXY_1 %>%
+  filter(grepl("-FL$|-Cl$", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("-?FL$|-?Cl$", "", Protein),  # Create base protein name
+    Suffix = ifelse(grepl("FL$|-FL$", Protein), "FL", "Cl") # Identify whether the protein has FL or Cl suffix
+  )
+
+# Separate 'FL' and 'CL' data
+fl_data_MXYvFXY <- suffix_data_MXYvFXY %>% filter(Suffix == "FL")
+cl_data_MXYvFXY <- suffix_data_MXYvFXY %>% filter(Suffix == "Cl")
+
+# Join 'FL' and 'Cl' datasets by ProteinBase and Gene
+combined_suffix_MXYvFXY <- full_join(fl_data_MXYvFXY, cl_data_MXYvFXY, by = c("ProteinBase", "Gene"), suffix = c("_FL", "_Cl"))
+
+# Calculate unweighted average between FL and Cl values
+Protein_MXYvFXY_uw_avg <- combined_suffix_MXYvFXY %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = mean(c(`Mean of MXY_FL`, `Mean of MXY_Cl`), na.rm = TRUE),
+    `Mean of FXY` = mean(c(`Mean of FXY_FL`, `Mean of FXY_Cl`), na.rm = TRUE),
+    Difference = `Mean of MXY` - `Mean of FXY`
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of FXY`, Difference)%>%
+  rename(Protein = ProteinBase)
+  
+# Replace original rows with calculated means
+# Perform the join
+Protein_MXYvFXY_2 <- Protein_MXYvFXY_1 %>%
+  left_join(Protein_MXYvFXY_uw_avg, by = c("Gene")) %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = coalesce(`Mean of MXY.y`, `Mean of MXY.x`),
+    `Mean of FXY` = coalesce(`Mean of FXY.y`, `Mean of FXY.x`),
+    Difference = coalesce(Difference.y, Difference.x),
+    Protein = coalesce(Protein.y, Protein.x),
+    ) %>%
+  ungroup() %>%
+  select(Protein, Gene, `Mean of MXY`, `Mean of FXY`, Difference) %>%
+  mutate(Protein = sub(" - .*", "", Protein)) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) %>%
+  mutate_if(is.numeric, round, 3)
+
+# merge back to og df
+head(Protein_MXYvFXY_2)
+```
+
+### MXYvMXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+ 
+# Subset for 'FL' and 'CL' suffixed proteins
+suffix_data_MXYvMXX <- Protein_MXYvMXX_1 %>%
+  filter(grepl("-FL$|-Cl$", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("-?FL$|-?Cl$", "", Protein),  # Create base protein name
+    Suffix = ifelse(grepl("FL$|-FL$", Protein), "FL", "Cl") # Identify whether the protein has FL or Cl suffix
+  )
+
+# Separate 'FL' and 'CL' data
+fl_data_MXYvMXX <- suffix_data_MXYvMXX %>% filter(Suffix == "FL")
+cl_data_MXYvMXX <- suffix_data_MXYvMXX %>% filter(Suffix == "Cl")
+
+# Join 'FL' and 'Cl' datasets by ProteinBase and Gene
+combined_suffix_MXYvMXX <- full_join(fl_data_MXYvMXX, cl_data_MXYvMXX, by = c("ProteinBase", "Gene"), suffix = c("_FL", "_Cl"))
+
+# Calculate unweighted average between FL and Cl values
+Protein_MXYvMXX_uw_avg <- combined_suffix_MXYvMXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = mean(c(`Mean of MXY_FL`, `Mean of MXY_Cl`), na.rm = TRUE),
+    `Mean of MXX` = mean(c(`Mean of MXX_FL`, `Mean of MXX_Cl`), na.rm = TRUE),
+    Difference = `Mean of MXY` - `Mean of MXX`
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of MXX`, Difference)%>%
+  rename(Protein = ProteinBase)
+  
+# Replace original rows with calculated means
+# Perform the join
+Protein_MXYvMXX_2 <- Protein_MXYvMXX_1 %>%
+  left_join(Protein_MXYvMXX_uw_avg, by = c("Gene")) %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = coalesce(`Mean of MXY.y`, `Mean of MXY.x`),
+    `Mean of MXX` = coalesce(`Mean of MXX.y`, `Mean of MXX.x`),
+    Difference = coalesce(Difference.y, Difference.x),
+    Protein = coalesce(Protein.y, Protein.x),
+    ) %>%
+  ungroup() %>%
+  select(Protein, Gene, `Mean of MXY`, `Mean of MXX`, Difference) %>%
+  mutate(Protein = sub(" - .*", "", Protein)) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) %>%
+  mutate_if(is.numeric, round, 3)
+
+# merge back to og df
+head(Protein_MXYvMXX_2)
+```
+
+In this is step the data is processed further by calculating the mean for proteins that have multiple measurements. These proteins are ENaC alpha and ENaC gamma.  
+
+## Step 3: Calculate the weighted average for cortex and medullary proteins
+
+### FXYvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Subset the data to get proteins with prefix 'm' and 'c'
+labeled_data_FXYvFXX <- Protein_FXYvFXX_2 %>%
+  filter(grepl("^m|^c", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("^m|^c", "", Protein),  # Create a base name without 'm' or 'c' for merging later
+    Prefix = ifelse(grepl("^m", Protein), "m", "c")  # Identify if it's 'm' or 'c'
+    )
+
+# Separate 'm' and 'c' data for easy access
+m_data_FXYvFXX <- labeled_data_FXYvFXX %>% filter(Prefix == "m")
+c_data_FXYvFXX <- labeled_data_FXYvFXX %>% filter(Prefix == "c")
+
+# join the 'm' and 'c' data on their ProteinBase (common protein names)
+combined_data_FXYvFXX <- full_join(m_data_FXYvFXX, c_data_FXYvFXX, by = c("ProteinBase", "Gene"), suffix = c("_m", "_c"))
+
+# Apply the weighted average formula (4c + m) / 5  & create difference column
+Protein_FXYvFXX_w_avg <- combined_data_FXYvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of FXX` = ifelse(is.na(`Mean of FXX_c`) | is.na(`Mean of FXX_m`),
+                           coalesce(`Mean of FXX_c`, `Mean of FXX_m`),  # Use the available value if one is missing
+                           (4 * `Mean of FXX_c` + `Mean of FXX_m`) / 5), # Otherwise, apply the weighted average
+    `Mean of FXY` = ifelse(is.na(`Mean of FXY_c`) | is.na(`Mean of FXY_m`),
+                           coalesce(`Mean of FXY_c`, `Mean of FXY_m`),
+                           (4 * `Mean of FXY_c` + `Mean of FXY_m`) / 5),
+    Difference = `Mean of FXX` - `Mean of FXY`  # Recalculate the 'Difference' column
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of FXX`, `Mean of FXY`, Difference)
+
+# Rename ProteinBase back to Protein in the updated subset for merging
+Protein_FXYvFXX_3 <- Protein_FXYvFXX_w_avg %>%
+  rename(Protein = ProteinBase) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein_FXYvFXX_3)
+```
+
+### MXXvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Subset the data to get proteins with prefix 'm' and 'c'
+labeled_data_MXXvFXX <- Protein_MXXvFXX_2 %>%
+  filter(grepl("^m|^c", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("^m|^c", "", Protein),  # Create a base name without 'm' or 'c' for merging later
+    Prefix = ifelse(grepl("^m", Protein), "m", "c")  # Identify if it's 'm' or 'c'
+    )
+
+# Separate 'm' and 'c' data for easy access
+m_data_MXXvFXX <- labeled_data_MXXvFXX %>% filter(Prefix == "m")
+c_data_MXXvFXX <- labeled_data_MXXvFXX %>% filter(Prefix == "c")
+
+# join the 'm' and 'c' data on their ProteinBase (common protein names)
+combined_data_MXXvFXX <- full_join(m_data_MXXvFXX, c_data_MXXvFXX, by = c("ProteinBase", "Gene"), suffix = c("_m", "_c"))
+
+# Apply the weighted average formula (4c + m) / 5  & create difference column
+Protein_MXXvFXX_w_avg <- combined_data_MXXvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXX` = ifelse(is.na(`Mean of MXX_c`) | is.na(`Mean of MXX_m`),
+                           coalesce(`Mean of MXX_c`, `Mean of MXX_m`),  # Use the available value if one is missing
+                           (4 * `Mean of MXX_c` + `Mean of MXX_m`) / 5), # Otherwise, apply the weighted average
+    `Mean of FXX` = ifelse(is.na(`Mean of FXX_c`) | is.na(`Mean of FXX_m`),
+                           coalesce(`Mean of FXX_c`, `Mean of FXX_m`),
+                           (4 * `Mean of FXX_c` + `Mean of FXX_m`) / 5),
+    Difference = `Mean of MXX` - `Mean of FXX`  # Recalculate the 'Difference' column
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXX`, `Mean of FXX`, Difference)
+
+# Rename ProteinBase back to Protein in the updated subset for merging
+Protein_MXXvFXX_3 <- Protein_MXXvFXX_w_avg %>%
+  rename(Protein = ProteinBase) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein_MXXvFXX_3)
+```
+
+### MXYvFXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Subset the data to get proteins with prefix 'm' and 'c'
+labeled_data_MXYvFXX <- Protein_MXYvFXX_2 %>%
+  filter(grepl("^m|^c", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("^m|^c", "", Protein),  # Create a base name without 'm' or 'c' for merging later
+    Prefix = ifelse(grepl("^m", Protein), "m", "c")  # Identify if it's 'm' or 'c'
+    )
+
+# Separate 'm' and 'c' data for easy access
+m_data_MXYvFXX <- labeled_data_MXYvFXX %>% filter(Prefix == "m")
+c_data_MXYvFXX <- labeled_data_MXYvFXX %>% filter(Prefix == "c")
+
+# join the 'm' and 'c' data on their ProteinBase (common protein names)
+combined_data_MXYvFXX <- full_join(m_data_MXYvFXX, c_data_MXYvFXX, by = c("ProteinBase", "Gene"), suffix = c("_m", "_c"))
+
+# Apply the weighted average formula (4c + m) / 5  & create difference column
+Protein_MXYvFXX_w_avg <- combined_data_MXYvFXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = ifelse(is.na(`Mean of MXY_c`) | is.na(`Mean of MXY_m`),
+                           coalesce(`Mean of MXY_c`, `Mean of MXY_m`),  # Use the available value if one is missing
+                           (4 * `Mean of MXY_c` + `Mean of MXY_m`) / 5), # Otherwise, apply the weighted average
+    `Mean of FXX` = ifelse(is.na(`Mean of FXX_c`) | is.na(`Mean of FXX_m`),
+                           coalesce(`Mean of FXX_c`, `Mean of FXX_m`),
+                           (4 * `Mean of FXX_c` + `Mean of FXX_m`) / 5),
+    Difference = `Mean of MXY` - `Mean of FXX`  # Recalculate the 'Difference' column
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of FXX`, Difference)
+
+# Rename ProteinBase back to Protein in the updated subset for merging
+Protein_MXYvFXX_3 <- Protein_MXYvFXX_w_avg %>%
+  rename(Protein = ProteinBase) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein_MXYvFXX_3)
+```
+
+### MXYvFXY
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Subset the data to get proteins with prefix 'm' and 'c'
+labeled_data_MXYvFXY <- Protein_MXYvFXY_2 %>%
+  filter(grepl("^m|^c", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("^m|^c", "", Protein),  # Create a base name without 'm' or 'c' for merging later
+    Prefix = ifelse(grepl("^m", Protein), "m", "c")  # Identify if it's 'm' or 'c'
+    )
+
+# Separate 'm' and 'c' data for easy access
+m_data_MXYvFXY <- labeled_data_MXYvFXY %>% filter(Prefix == "m")
+c_data_MXYvFXY <- labeled_data_MXYvFXY %>% filter(Prefix == "c")
+
+# join the 'm' and 'c' data on their ProteinBase (common protein names)
+combined_data_MXYvFXY <- full_join(m_data_MXYvFXY, c_data_MXYvFXY, by = c("ProteinBase", "Gene"), suffix = c("_m", "_c"))
+
+# Apply the weighted average formula (4c + m) / 5  & create difference column
+Protein_MXYvFXY_w_avg <- combined_data_MXYvFXY %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXY` = ifelse(is.na(`Mean of MXY_c`) | is.na(`Mean of MXY_m`),
+                           coalesce(`Mean of MXY_c`, `Mean of MXY_m`),  # Use the available value if one is missing
+                           (4 * `Mean of MXY_c` + `Mean of MXY_m`) / 5), # Otherwise, apply the weighted average
+    `Mean of FXY` = ifelse(is.na(`Mean of FXY_c`) | is.na(`Mean of FXY_m`),
+                           coalesce(`Mean of FXY_c`, `Mean of FXY_m`),
+                           (4 * `Mean of FXY_c` + `Mean of FXY_m`) / 5),
+    Difference = `Mean of MXY` - `Mean of FXY`  # Recalculate the 'Difference' column
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of FXY`, Difference)
+
+# Rename ProteinBase back to Protein in the updated subset for merging
+Protein_MXYvFXY_3 <- Protein_MXYvFXY_w_avg %>%
+  rename(Protein = ProteinBase) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein_MXYvFXY_3)
+```
+
+### MXYvMXX
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Subset the data to get proteins with prefix 'm' and 'c'
+labeled_data_MXYvMXX <- Protein_MXYvMXX_2 %>%
+  filter(grepl("^m|^c", Protein)) %>%
+  mutate(
+    ProteinBase = gsub("^m|^c", "", Protein),  # Create a base name without 'm' or 'c' for merging later
+    Prefix = ifelse(grepl("^m", Protein), "m", "c")  # Identify if it's 'm' or 'c'
+    )
+
+# Separate 'm' and 'c' data for easy access
+m_data_MXYvMXX <- labeled_data_MXYvMXX %>% filter(Prefix == "m")
+c_data_MXYvMXX <- labeled_data_MXYvMXX %>% filter(Prefix == "c")
+
+# join the 'm' and 'c' data on their ProteinBase (common protein names)
+combined_data_MXYvMXX <- full_join(m_data_MXYvMXX, c_data_MXYvMXX, by = c("ProteinBase", "Gene"), suffix = c("_m", "_c"))
+
+# Apply the weighted average formula (4c + m) / 5  & create difference column
+Protein_MXYvMXX_w_avg <- combined_data_MXYvMXX %>%
+  rowwise() %>%
+  mutate(
+    `Mean of MXX` = ifelse(is.na(`Mean of MXX_c`) | is.na(`Mean of MXX_m`),
+                           coalesce(`Mean of MXX_c`, `Mean of MXX_m`),  # Use the available value if one is missing
+                           (4 * `Mean of MXX_c` + `Mean of MXX_m`) / 5), # Otherwise, apply the weighted average
+    `Mean of MXY` = ifelse(is.na(`Mean of MXY_c`) | is.na(`Mean of MXY_m`),
+                           coalesce(`Mean of MXY_c`, `Mean of MXY_m`),
+                           (4 * `Mean of MXY_c` + `Mean of MXY_m`) / 5),
+    Difference = `Mean of MXX` - `Mean of MXY`  # Recalculate the 'Difference' column
+  ) %>%
+  ungroup() %>%
+  select(ProteinBase, Gene, `Mean of MXY`, `Mean of MXX`, Difference)
+
+# Rename ProteinBase back to Protein in the updated subset for merging
+Protein_MXYvMXX_3 <- Protein_MXYvMXX_w_avg %>%
+  rename(Protein = ProteinBase) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein_MXYvMXX_3)
+```
+
+The data frames above represent the data after one step of processing. In this step a weighted average of the medullary and cortex proteins was calculated. To compute the weighted average, we used the formula 4c+m/5 to reflect the assumed 4 to 1 ratio of cortex and medullary proteins in the sample. The proteins for which we used this formula for were AQP1, NHE3, NKCC2, NKAα1, NKAβ1, BKβ4, MUC1, ENaCα, ENaCγ, SGLT1, SPAK, WNK4, and AQP2.
+
+## Step 4: Normalizing Second Sex Characteristic to 1
+
+### FXYvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "FXX" column to 1 and adjust other columns accordingly
+Protein_FXYvFXX_4 <- Protein_FXYvFXX_3 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of FXY` = `Mean of FXY` / `Mean of FXX`[1], 
+    Difference = Difference / `Mean of FXX`[1],
+    `Mean of FXX` = `Mean of FXX` / `Mean of FXX`[1],  
+      ) %>%
+  mutate_if(is.numeric, round, 3) %>%
+  select(-Protein)
+
+head(Protein_FXYvFXX_4)
+```
+
+### MXXvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "FXX" column to 1 and adjust other columns accordingly
+Protein_MXXvFXX_4 <- Protein_MXXvFXX_3 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of MXX` = `Mean of MXX` / `Mean of FXX`[1], 
+    Difference = Difference / `Mean of FXX`[1],
+    `Mean of FXX` = `Mean of FXX` / `Mean of FXX`[1],  
+      ) %>%
+  mutate_if(is.numeric, round, 3) %>%
+  select(-Protein)
+
+head(Protein_MXXvFXX_4)
+``` 
+
+### MXYvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "FXX" column to 1 and adjust other columns accordingly
+Protein_MXYvFXX_4 <- Protein_MXYvFXX_3 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of FXX` = `Mean of FXX` / `Mean of MXY`[1], 
+    Difference = Difference / `Mean of MXY`[1],
+    `Mean of MXY` = `Mean of MXY` / `Mean of MXY`[1],  
+      ) %>%
+  mutate_if(is.numeric, round, 3) %>%
+  select(-Protein)
+
+head(Protein_MXYvFXX_4)
+```
+
+### MXYvFXY
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "FXX" column to 1 and adjust other columns accordingly
+Protein_MXYvFXY_4 <- Protein_MXYvFXY_3 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of FXY` = `Mean of FXY` / `Mean of MXY`[1], 
+    Difference = Difference / `Mean of FXY`[1],
+    `Mean of MXY` = `Mean of MXY` / `Mean of MXY`[1],  
+      ) %>%
+  mutate_if(is.numeric, round, 3) %>%
+  select(-Protein)
+
+head(Protein_MXYvFXY_4)
+```
+
+### MXYvMXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "FXX" column to 1 and adjust other columns accordingly
+Protein_MXYvMXX_4 <- Protein_MXYvMXX_3 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of MXY` = `Mean of MXY` / `Mean of MXX`[1], 
+    Difference = Difference / `Mean of MXX`[1],
+    `Mean of MXX` = `Mean of MXX` / `Mean of MXX`[1],  
+      ) %>%
+  mutate_if(is.numeric, round, 3) %>%
+  select(-Protein)
+
+head(Protein_MXYvMXX_4)
+```
+
+In this step I normalized the data frame so the second sex characteristic is normalized to 1, and other columns are proportionally adjusted based on this normalization. For example in the comparison FXYvFXX, I normalize the Mean of FXX to 1. To do this I grouped by the Gene column to ensure calculations are performed separately for each gene. The I adjusted each by dividing its values by the second sex characteristic value within the group.
+
+# Cleaning the RNA data
+
+## Step 1: Rotate the dataframe.
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#rotate df and create gene column 
+RNA_cell_1 <- Pseudobulk.cell %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+RNA_cell_group_1 <- Pseudobulk.cell.group %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+RNA_group_1 <- Pseudobulk.group %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+#gene_name <- unique(unlist(Protein_FXYvFXX$Gene))
+# Filter dataframe to keep only the selected genes
+RNA_group_1 <- RNA_group_1 %>%
+  filter(Gene %in% gene_name)
+
+head(RNA_group_1)
+```
+
+In this step I rotated the data frame so the columns became rows and vice versa. I did this to make correlating the RNA and Protein data easier. 
+
+## Step 2: Rename the colums
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Renaming the columns
+RNA_group_2 <- RNA_group_1 %>% 
+  dplyr::rename(
+    `Mean of MXX` = `F-KO`,
+    `Mean of FXX` = `F-WT`,
+    `Mean of FXY` = `M-KO`,
+    `Mean of MXY` = `M-WT`) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(RNA_group_2)
+```
+
+In this step I renamed the columns so they matched the columns from the RNA data. 
+
+## Step 3: Normalizing WT to 1
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+# Normalize the "WT" column to 1 and adjust other columns accordingly
+RNA_group_3 <- RNA_group_2 %>%
+  group_by(Gene) %>%
+  mutate(
+    `Mean of MXX` = `Mean of MXX` / `Mean of MXY`[1],  
+    `Mean of FXX` = `Mean of FXX` / `Mean of MXY`[1],  
+    `Mean of FXY` = `Mean of FXY` / `Mean of MXY`[1],
+    `Mean of MXY` = `Mean of MXY` / `Mean of MXY`[1],) %>%
+  mutate_if(is.numeric, round, 3)
+
+head(RNA_group_3)
+```
+
+In this step I normalized the data frame so MXY is normalized to 1, and other columns are proportionally adjusted based on this normalization. To do this I grouped by the Gene column to ensure calculations are performed separately for each gene. The I adjusted each by dividing its values by the first WT value within the group.
+
+# Scatter Plot
+
+## MXYvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width=12}
+
+# convert data frames into tidyform
+Protein_MXYvFXX_5 <- Protein_MXYvFXX_4 %>%
+  dplyr::rename(
+    MXY = `Mean of MXY`,
+    FXX = `Mean of FXX`)%>%
+  pivot_longer(cols = MXY:FXX, names_to = "Group", values_to = "Value")
+
+RNA_group_4 <- RNA_group_3 %>%
+    dplyr::rename(
+    MXX = `Mean of MXX`,
+    FXX = `Mean of FXX`,
+    FXY = `Mean of FXY`,
+    MXY = `Mean of MXY`)%>%
+  pivot_longer(cols = MXX:MXY, names_to = "Group", values_to = "Value")
+
+# create Type column
+RNA_group_4$Type <- "RNA"
+
+Protein_MXYvFXX_5$Type <- "Protein"
+
+# Merge RNA and Protein df
+combined_df_MXYvFXX <- rbind(Protein_MXYvFXX_5, RNA_group_4)
+
+# Reorder the X axis to be (MXY, FXY, FXX, MXX)
+combined_df_MXYvFXX$Group <- factor(combined_df_MXYvFXX$Group, levels = c("MXY", "FXY", "FXX", "MXX"))
+
+# Plot the data for the specific gene Aqp1
+#no line
+ggplot(combined_df_MXYvFXX %>% 
+         filter(Group %in% c("MXY", "FXX"), Gene %in% c("Aqp1")), 
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point(size = 4) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  coord_cartesian(ylim = c(0.5, 3)) +   
+  labs(title = paste("Scatter Plot of Value by Group and Type for", "Aqp1"), 
+       x = "Group", y = "Value")
+
+#same graph, solid line
+ggplot(combined_df_MXYvFXX %>% 
+         filter(Group %in% c("MXY", "FXX"), Gene %in% c("Aqp1")), 
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point(size = 4) + 
+  geom_line(aes(group = interaction(Gene, Group)), linetype = "solid", color = "purple",size = 1.2) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  coord_cartesian(ylim = c(0.5, 3)) +   
+  labs(title = paste("Scatter Plot of Value by Group and Type for", "Aqp1"), 
+       x = "Group", y = "Value")
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+# fixed axis, no line
+ggplot(combined_df_MXYvFXX %>% filter(Group %in% c("MXY", "FXX")),
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 5)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+
+## Fixed axis, solid line
+ggplot(combined_df_MXYvFXX %>% filter(Group %in% c("MXY", "FXX")),
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  geom_line(aes(group = interaction(Gene, Group)), linetype = "solid", color = "purple") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 5)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+```
+
+## MXYvFXY
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width=12}
+
+# convert data frames into tidyform 
+Protein_MXYvFXY_5 <- Protein_MXYvFXY_4 %>%
+  dplyr::rename(
+    MXY = `Mean of MXY`,
+    FXY = `Mean of FXY`)%>%
+  pivot_longer(cols = MXY:FXY, names_to = "Group", values_to = "Value")
+
+# create Type column
+
+ Protein_MXYvFXY_5$Type <- "Protein"
+
+# Merge RNA and Protein df
+combined_df_MXYvFXY <- rbind(Protein_MXYvFXY_5, RNA_group_4)
+
+# Reorder the X axis to be (MXY, FXY, FXX, MXX)
+combined_df_MXYvFXY$Group <- factor(combined_df_MXYvFXY$Group, levels = c("MXY", "FXY", "FXX", "MXX"))
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+# fixed axis, no line
+ggplot(combined_df_MXYvFXY %>% filter(Group %in% c("MXY", "FXY")),
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 2.5)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+## Fixed axis, solid line
+ggplot(combined_df_MXYvFXY %>% filter(Group %in% c("MXY", "FXY")),
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  geom_line(aes(group = interaction(Gene, Group)), linetype = "solid", color = "purple") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 2.5)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+```
+
+## MXXvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width=12}
+
+# subset MXX and FXX
+RNA_group_MXX.FXX <-subset(RNA_group_4, Group %in% c("MXX", "FXX"))
+
+# create separate columns for "WT" and "KO" values, normalize FXX to 1
+pivoted_RNA_group_MXX.FXX <- RNA_group_MXX.FXX %>%
+  pivot_wider(names_from = Group, values_from = Value) %>%
+  group_by(Gene, Type) %>%
+  mutate(
+    MXX = MXX / FXX[1],
+    FXX = FXX / FXX[1],) %>%
+  ungroup()
+
+# recombine columns  
+RNA_group_MXX.FXX.2 <- pivoted_RNA_group_MXX.FXX %>%
+  pivot_longer(cols = c(MXX, FXX), names_to = "Group", values_to = "Value")
+
+# convert data frames into tidyform 
+Protein_MXXvFXX_5 <- Protein_MXXvFXX_4 %>%
+  dplyr::rename(
+    MXX = `Mean of MXX`,
+    FXX = `Mean of FXX`)%>%
+  pivot_longer(cols = MXX:FXX, names_to = "Group", values_to = "Value")
+
+# create Type column
+ Protein_MXXvFXX_5$Type <- "Protein"
+
+# Merge RNA and Protein df
+combined_df_MXXvFXX <- rbind(Protein_MXXvFXX_5, RNA_group_MXX.FXX.2)
+
+# Reorder the X axis to be (MXY, FXY, FXX, MXX)
+combined_df_MXXvFXX$Group <- factor(combined_df_MXXvFXX$Group, levels = c("MXY", "FXY", "FXX", "MXX"))
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+# fixed axis, no line
+ggplot(combined_df_MXXvFXX,
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 2)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+## Fixed axis, solid line
+ggplot(combined_df_MXXvFXX,
+       aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  geom_line(aes(group = interaction(Gene, Group)), linetype = "solid", color = "purple") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.5, 2)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+```
+
+# Basic Correlation Table
+
+## MXYvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Create a new dataframe that creates new columns to have the values for RNA and Protein in the same row
+combined_df_MXYvFXX_2 <- combined_df_MXYvFXX %>%
+  filter(Group %in% c("MXY", "FXX")) %>% 
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value)
+
+# Create a new column if RNA is greater than 1
+combined_df_MXYvFXX_2$RNA_Greater_1 <- ifelse(combined_df_MXYvFXX_2$RNA > 1, "Yes", "No")
+combined_df_MXYvFXX_2$Protein_Greater_1 <- ifelse(combined_df_MXYvFXX_2$Protein > 1, "Yes", "No")
+
+#create a  column if RNA_Greater_1 and Protein_Greater_1 are the same value
+combined_df_MXYvFXX_2$Same <- ifelse(combined_df_MXYvFXX_2$RNA_Greater_1 == combined_df_MXYvFXX_2$Protein_Greater_1, "Yes", "No")
+
+# Count how many values are yes or no in the column Same
+combined_df_MXYvFXX_2 %>%
+  group_by(Same) %>%
+  summarise(Count = n())
+
+# Filter the rows where Same is "No" and select the Gene column
+gene_list_no_MXYvFXX <- combined_df_MXYvFXX_2 %>%
+  filter(Same == "No") %>%
+  pull(Gene) 
+
+print(gene_list_no_MXYvFXX)
+```
+
+## MXYvFXY
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Create a new dataframe that creates new columns to have the values for RNA and Protein in the same row
+combined_df_MXYvFXY_2 <- combined_df_MXYvFXY %>%
+  filter(Group %in% c("MXY", "FXY")) %>% 
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value)
+
+# Create a new column if RNA is greater than 1
+combined_df_MXYvFXY_2$RNA_Greater_1 <- ifelse(combined_df_MXYvFXY_2$RNA > 1, "Yes", "No")
+combined_df_MXYvFXY_2$Protein_Greater_1 <- ifelse(combined_df_MXYvFXY_2$Protein > 1, "Yes", "No")
+
+#create a  column if RNA_Greater_1 and Protein_Greater_1 are the same value
+combined_df_MXYvFXY_2$Same <- ifelse(combined_df_MXYvFXY_2$RNA_Greater_1 == combined_df_MXYvFXY_2$Protein_Greater_1, "Yes", "No")
+
+# Count how many values are yes or no in the column Same
+combined_df_MXYvFXY_2 %>%
+  group_by(Same) %>%
+  summarise(Count = n())
+
+# Filter the rows where Same is "No" and select the Gene column
+gene_list_no_MXYvFXY <- combined_df_MXYvFXY_2 %>%
+  filter(Same == "No") %>%
+  pull(Gene)  
+
+print(gene_list_no_MXYvFXY)
+```
+
+## MXXvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Create a new dataframe that creates new columns to have the values for RNA and Protein in the same row
+combined_df_MXXvFXX_2 <- combined_df_MXXvFXX %>%
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value)
+
+# Create a new column if RNA is greater than 1
+combined_df_MXXvFXX_2$RNA_Greater_1 <- ifelse(combined_df_MXXvFXX_2$RNA > 1, "Yes", "No")
+combined_df_MXXvFXX_2$Protein_Greater_1 <- ifelse(combined_df_MXXvFXX_2$Protein > 1, "Yes", "No")
+
+#create a  column if RNA_Greater_1 and Protein_Greater_1 are the same value
+combined_df_MXXvFXX_2$Same <- ifelse(combined_df_MXXvFXX_2$RNA_Greater_1 == combined_df_MXXvFXX_2$Protein_Greater_1, "Yes", "No")
+
+# Count how many values are yes or no in the column Same
+combined_df_MXXvFXX_2 %>%
+  group_by(Same) %>%
+  summarise(Count = n())
+
+# Filter the rows where Same is "No" and select the Gene column
+gene_list_no_MXXvFXX <- combined_df_MXXvFXX_2 %>%
+  filter(Same == "No") %>%
+  pull(Gene)
+
+print(gene_list_no_MXXvFXX)
+```
+
+**These tables help assess the correlation between RNA and protein expression levels. They takes into account whether RNA and protein levels are greater than 1, then counts how often these conditions match.**
+
+# Heat maps of the change within groups 
+
+## MXYvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# subset MXY and FXX
+subset_df_MXYvFXX <-subset(combined_df_MXYvFXX, Group %in% c("MXY", "FXX"))
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_df_MXYvFXX <- subset_df_MXYvFXX %>%
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(`Absolute Difference` = abs(RNA - Protein))%>%
+  group_by(Gene) %>%
+  summarise(
+  `Absolute Difference MXY` = `Absolute Difference`[Group == "MXY"],
+  `Absolute Difference FXX` = `Absolute Difference`[Group == "FXX"],    
+  `Sum Deltas` = sum(`Absolute Difference`[Group == "MXY"], na.rm = TRUE) + 
+                   sum(`Absolute Difference`[Group == "FXX"], na.rm = TRUE)) %>%
+  ungroup() 
+
+head(abs_diff_df_MXYvFXX)
+```
+
+## MXYvFXY
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# subset MXY and FXY
+subset_df_MXYvFXY <-subset(combined_df_MXYvFXY, Group %in% c("MXY", "FXY"))
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_df_MXYvFXY <- subset_df_MXYvFXY %>%
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(`Absolute Difference` = abs(RNA - Protein))%>%
+  group_by(Gene) %>%
+  summarise(
+  `Absolute Difference MXY` = `Absolute Difference`[Group == "MXY"],
+  `Absolute Difference FXY` = `Absolute Difference`[Group == "FXY"],    
+  `Sum Deltas` = sum(`Absolute Difference`[Group == "MXY"], na.rm = TRUE) + 
+                   sum(`Absolute Difference`[Group == "FXY"], na.rm = TRUE)) %>%
+  ungroup() 
+
+head(abs_diff_df_MXYvFXY)
+```
+
+## MXXvFXX
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_df_MXXvFXX <- combined_df_MXXvFXX %>%
+  select(-Difference) %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(`Absolute Difference` = abs(RNA - Protein))%>%
+  group_by(Gene) %>%
+  summarise(
+  `Absolute Difference MXX` = `Absolute Difference`[Group == "MXX"],
+  `Absolute Difference FXX` = `Absolute Difference`[Group == "FXX"],    
+  `Sum Deltas` = sum(`Absolute Difference`[Group == "MXX"], na.rm = TRUE) + 
+                   sum(`Absolute Difference`[Group == "FXX"], na.rm = TRUE)) %>%
+  ungroup() 
+
+head(abs_diff_df_MXXvFXX)
+```
+
+## Heat Maps
+
+### Static Range
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width = 6}
+
+# label metric of comparison
+abs_diff_df_MXYvFXX$Metric <- "MXY vs FXX"
+abs_diff_df_MXYvFXY$Metric <- "MXY vs FXY"
+abs_diff_df_MXXvFXX$Metric <- "MXX vs FXX"
+
+# join dfs
+abs_diff_hm_df <- bind_rows(
+  mutate(abs_diff_df_MXYvFXX, Metric = "MXY vs FXX"),
+  mutate(abs_diff_df_MXYvFXY, Metric = "MXY vs FXY"),
+  mutate(abs_diff_df_MXXvFXX, Metric = "MXX vs FXX")
+)
+
+# order metrics
+abs_diff_hm_df$Metric <- factor(abs_diff_hm_df$Metric, levels = c("MXY vs FXX", "MXY vs FXY", "MXX vs FXX"))
+
+# Create the heat map with facets
+ggplot(abs_diff_hm_df, aes(x = Metric, y = Gene, fill = `Sum Deltas`)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 4) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "Heat Map of the Sum of the Differences",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene",
+    fill = "Sum of Differences"
+  )
+```
+
+### Dynamic Range
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width = 10}
+
+# label metric of comparison
+##abs_diff_df_MXYvFXX$Metric <- "MXY vs FXX"
+##abs_diff_df_MXYvFXY$Metric <- "MXY vs FXY"
+##abs_diff_df_MXXvFXX$Metric <- "MXX vs FXX"
+
+# Common title for the plots
+common_title <- "Heat Map of Sum of Differences"
+
+# Create the MXYvFXX heat map 
+hm_MXYvFXX<- ggplot(abs_diff_df_MXYvFXX, aes(x = Metric, y = Gene, fill = `Sum Deltas`)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 4) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene",
+    fill = "Sum of Differences"
+  )
+
+# Create the MXYvFXY heat map 
+hm_MXYvFXY<- ggplot(abs_diff_df_MXYvFXY, aes(x = Metric, y = Gene, fill = `Sum Deltas`)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 4) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene",
+    fill = "Sum of Differences"
+  )
+
+# Create the MXXvFXX heat map 
+hm_MXXvFXX<- ggplot(abs_diff_df_MXXvFXX, aes(x = Metric, y = Gene, fill = `Sum Deltas`)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 4) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene",
+    fill = "Sum of Differences"
+  )
+
+# Arrange the heat maps side by side
+grid.arrange(hm_MXYvFXX, hm_MXYvFXY, hm_MXXvFXX, ncol = 3, top = common_title)
+```
+
+# Save as RDS
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width = 10}
+
+saveRDS(abs_diff_hm_df, "FCG.RDS")
+```
+
+# Session Info
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+sessionInfo()
+```

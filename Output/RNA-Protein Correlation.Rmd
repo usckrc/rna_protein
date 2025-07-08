@@ -1,0 +1,937 @@
+---
+title: "RNA-Protein Correlation"
+author: "Sienna Blanche"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    number_sections: no
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("devtools")) {install.packages("devtools"); require("devtools")}
+if (!require("sjmisc")) {install.packages("sjmisc"); require("sjmisc")}
+if (!require("gridExtra")) {install.packages("gridExtra"); require("gridExtra")}
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("pheatmap")) {install.packages("pheatmap"); require("pheatmap")}
+if (!require("viridis")) {install.packages("viridis"); require("viridis")}
+if (!require("cowplot")) {install.packages("cowplot"); require("cowplot")}
+
+set.seed(12345)
+here()
+```
+
+# Project Narritive 
+
+The goal of this project is to examine the relationship between RNA and protein expression.
+
+## Protein Processing
+
+This section details how I went about deciding how to analyze each of the proteins from the western blot data. I did not factor any of the phosphorylated proteins in my analysis. For the proteins that are present in both the medulla and the cortex, like NHE3, AQP1, and NKCC2, I use a weighted average that creates a new value that accounts for the expression in both locations of the kidney. For proteins like AQP1 and ENaC which have two reported lengths, I calculated the mean of their respective values.
+
+## Narrative of workflow
+
+1. After loading the data I visualize the genes of interest through a series of box blots to determine the relative amount of expression in the medulla versus in the cortex. 
+2. Next I cleaned the protein data in three steps by selecting the desired columns from the raw western blot data, calculating the weighted average for cortex and medullary proteins, and calculating the average expression for proteins with multiple methods of measurement. 
+3. I repeated a similar set of steps with the RNA data. To clean this set of data, I rotated the data frame, renamed the columns, then normalized the wild type values to one. 
+4. Once both sets of data were cleaned, I compared them to their original data frames via a bar graph for the protein data and a set of box plots for the RNA data. 
+5. Next I visualized the data with a set of scatter plots.
+6. In order to visualize the data in an alternate method, I created a table to expressed how many of the genes/proteins expressed a basic correlation by determining how many of them shared the same patterns of expression across their RNA and protein data.  
+7. Next I examined the change of expression between protein and RNA within groups. I did this for the transformed data, as well as to look at the data in three pairs: WT vs KO, WT vs WT+A, and KO vs KO+A. I visualized the change in expression by looking at a scatter plot of their differences as well as calculating those differences and visualizing them on a set of heat maps.
+8. I then visualized the sum of those differences for each of those comparisons as well as the transformed data via bar graph where each point in the graph represented a sum for a gene as well as standard error bars.
+9. As an alternative method of visualizing this information, I created a table with the sum of the deltas for each comparison. 
+10. I then ran T-Tests for each of those comparisons to determine a possible relationship between the means of pairs.
+11. To assess the correlations between each of the pairs I compared the R squared values for each of the comparison which were calculated from the completion of a simple linear regression. These values were further visualized with a set of heat maps.
+12. Lastly, I computed the ratio of the mean absolute values of the difference in AngII groups compared to the difference in the KO group. 
+
+## Important notes 
+
+## Interpretation
+
+# Load Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#Load the PB dataset
+load(here("Dataset", "Pseudobulk_cell_group.RDS"))
+load(here("Dataset", "Pseudobulk_cell.RDS"))
+load(here("Dataset", "Pseudobulk_group.RDS"))
+
+# load xlsx dataset
+Protein <- read_excel("Dataset/Alicia data copy.xlsx")
+```
+
+# Visualize Genes of Interest
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# gene list
+gene_name <- unique(unlist(Protein$Gene))
+
+#loop that makes a box plot of the expression of each gene in every cell population
+  for (i in gene_name) {
+  # Extract the specified column along with rownames
+  if (i %in% colnames(Pseudobulk.cell)) {
+    selected_column <- Pseudobulk.cell[, i, drop = FALSE]
+    
+    # Save the results to a data frame with rownames
+    result_df <- data.frame(RowName = rownames(selected_column), Value = selected_column[, 1])
+    
+    # Ensure the RowName factor levels are consistent
+    result_df$RowName <- factor(result_df$RowName, levels = c("PTS1", "PTS2", "PTS3", "dTL", "TAL", "MD", "DCT1", "DCT2", "CNT", "PC", "ICA", "ICB", "Podo", "PEC", "EC", "Fib", "Contractile", "Mes", "Macro", "Lympho", "Uro"))
+    
+    # Create a box plot of result_df
+    f1 <- ggplot(result_df, aes(x = RowName, y = Value)) + 
+      geom_boxplot() + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      labs(title = i, x = "Cell Type", y = "Expression")
+  } else {
+    # Create a placeholder plot indicating the gene was not found
+    f1 <- ggplot() + 
+      annotate("text", x = 1, y = 1, label = paste("Gene", i, "not found in data frame"), size = 5, color = "red") + 
+      theme_void() + 
+      labs(title = i)
+  }
+
+  # Print plots
+  print(f1)
+}
+```
+
+# Cleaning the Protein data
+
+## Step 1: Clean the raw data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#clean raw protein data
+Protein.1 <- Protein %>%
+  select("Gene", "Protein", "WT", "WT+A", "KO", "KO+A")  
+
+head(Protein.1)
+```
+
+This is the cleaned version of the raw data.
+
+## Step 2: Calculate the weighted average for cortex and medullary proteins
+
+```{r echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# process the data according to the protein processing section
+# calculate the weighted mean for medulla and cortex proteins
+# Create a new column to identify labeled proteins
+Protein.2 <- Protein.1 %>%
+  mutate(
+    IsLabeled = grepl("^m", Protein),  # Identify labeled proteins by 'm' prefix
+    Protein = gsub("^m", "", Protein)  # Remove 'm' prefix to get the base protein name
+  )
+
+# Separate the labeled and unlabeled data
+labeled_data <- Protein.2 %>%
+  filter(IsLabeled) %>%
+  select(Protein, Gene,  WT, `WT+A`, KO, `KO+A`)
+
+unlabeled_data <- Protein.2 %>%
+  filter(!IsLabeled) %>%
+  select(Protein, Gene, WT, `WT+A`, KO, `KO+A`)
+
+# Join the labeled and unlabeled data on ProteinName
+combined_data <- full_join(unlabeled_data, labeled_data, by = c("Protein", "Gene"), suffix = c("_c", "_m"))
+
+# Apply the formula (4c + m) / 5 to each of the conditions
+Protein.2 <- combined_data %>%
+  rowwise() %>%
+  mutate(
+    WT = ifelse(is.na(WT_m) | is.na(WT_c), coalesce(WT_c, WT_m), (4 * WT_c + WT_m) / 5),
+    `WT+A` = ifelse(is.na(`WT+A_m`) | is.na(`WT+A_c`), coalesce(`WT+A_c`, `WT+A_m`), (4 * `WT+A_c` + `WT+A_m`) / 5),
+    KO = ifelse(is.na(KO_m) | is.na(KO_c), coalesce(KO_c, KO_m), (4 * KO_c + KO_m) / 5),
+    `KO+A` = ifelse(is.na(`KO+A_m`) | is.na(`KO+A_c`), coalesce(`KO+A_c`, `KO+A_m`), (4 * `KO+A_c` + `KO+A_m`) / 5)
+  ) %>%
+  ungroup() %>%
+  select(Protein, Gene, WT, `WT+A`, KO, `KO+A`)
+
+# round to 3 sig figs
+Protein.2 <- Protein.2 %>%
+  mutate_if(is.numeric, round, 3)
+
+head(Protein.2)
+```
+ 
+This is the data after one step of processing. In this step a weighted average of the medullary and cortex proteins was calculated. To compute the weighted average, we used the formula 4c+m/5. The proteins for which we used this formula for were AQP1, NHE3, NKCC2, NKA alpha 1, NKA beta 1, HO-1, and AQP2.
+
+## Step 3: Calculate the average for proteins with multiple measurements
+ 
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# process the data according to the protein processing section
+# calculate mean for full length vs cleaved proteins
+# Define patterns for identifying full and cleaved proteins
+
+  # Process full proteins
+  full_proteins <- Protein.2 %>%
+    filter(grepl(" - FL$| - glycos$| -\\s*35 kD$| -\\s*37 kD$" , Protein)) %>%
+    mutate(ProteinBase = sub(" - FL$| - glycos$| -\\s*35 kD$| -\\s*37 kD$", "", Protein))
+
+  # Process cleaved proteins
+  cleaved_proteins <- Protein.2 %>%
+    filter(grepl(" - cl$| - core$| -\\s*23 kD$" , Protein)) %>%
+    mutate(ProteinBase = sub(" - cl$| - core$| -\\s*23 kD$", "", Protein))
+  
+  # Merge full and cleaved proteins
+merged_data1 <- full_proteins %>%
+  inner_join(cleaved_proteins, by = c("Gene", "ProteinBase"), suffix = c("_full", "_cleaved"))
+
+  # Calculate means for each condition
+  means_data <- merged_data1 %>%
+  rowwise() %>%
+  mutate(
+    WT = mean(c(WT_full, WT_cleaved), na.rm = TRUE),
+    `WT+A` = mean(c(`WT+A_full`, `WT+A_cleaved`), na.rm = TRUE),
+    KO = mean(c(KO_full, KO_cleaved), na.rm = TRUE),
+    `KO+A` = mean(c(`KO+A_full`, `KO+A_cleaved`), na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  select(Gene, ProteinBase, WT, `WT+A`, KO, `KO+A`)
+  
+# Replace original rows with calculated means
+# Perform the join
+updated_data <- Protein.2 %>%
+  left_join(means_data, by = c("Gene"))
+
+# Replace original values with mean values where available
+result <- updated_data %>%
+  rowwise() %>%
+  mutate(
+    WT = coalesce(WT.y, WT.x),
+    `WT+A` = coalesce(`WT+A.y`, `WT+A.x`),
+    KO = coalesce(KO.y, KO.x),
+    `KO+A` = coalesce(`KO+A.y`, `KO+A.x`)
+  ) %>%
+  ungroup() %>%
+  select(Gene, Protein, WT, `WT+A`, KO, `KO+A`)
+
+Protein.2 <- result %>%
+  mutate(Protein = sub(" - .*", "", Protein)) %>%
+  distinct(Gene, Protein, .keep_all = TRUE) 
+
+# round to 3 sig figs
+Protein.2 <- Protein.2 %>%
+  mutate_if(is.numeric, round, 3)
+
+Protein.2
+```
+
+This is the final processed data that calculates the mean for proteins that had multiple measurements. For clarity those proteins are AQP1, AQP2, ROMK, ENaC alpha, and ENaC gamma.  
+
+# Cleaning the RNA data
+
+## Step 1: Rotate the dataframe.
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#rotate df and create gene column 
+RNA_cell <- Pseudobulk.cell %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+RNA_cell_group <- Pseudobulk.cell.group %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+RNA_group <- Pseudobulk.group %>%
+  rotate_df() %>%
+  mutate(Gene = rownames(.))
+
+# round to 3 sig figs
+RNA_group <- RNA_group %>%
+  mutate_if(is.numeric, round, 3)
+
+head(RNA_group)
+```
+
+In this step I rotated the data frame so the columns became rows and vice versa. I did this to make correlating the RNA and Protein data easier. 
+
+## Step 2: Rename the colums
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Renaming the columns
+RNA_group <- RNA_group %>% 
+  dplyr::rename(
+    WT = `Control Saline`,
+    `WT+A` = `Control AngII`,
+    KO = `PT ACE2 KO Saline`,
+    `KO+A` = `PT ACE2 KO AngII`)
+
+# round to 3 sig figs
+RNA_group <- RNA_group %>%
+  mutate_if(is.numeric, round, 3)
+
+head(RNA_group)
+```
+
+In this step I renamed the columns so they matched the columns from the RNA data. 
+
+## Step 3: Normalizing WT to 1
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE} 
+
+#gene_name <- unique(unlist(Protein.gene.data$Gene))
+# Filter dataframe to keep only the selected genes
+RNA_group <- RNA_group %>%
+  filter(Gene %in% gene_name)
+
+# Normalize the "WT" column to 1 and adjust other columns accordingly
+RNA_group1 <- RNA_group %>%
+  group_by(Gene) %>%
+  mutate(
+    `WT+A` = `WT+A` / WT[1],  
+    KO = KO / WT[1],  
+    `KO+A` = `KO+A` / WT[1],
+    WT = WT / WT[1],)
+
+# round to 3 sig figs
+RNA_group1 <- RNA_group1 %>%
+  mutate_if(is.numeric, round, 3)
+
+RNA_group1
+```
+
+In this step I normalized the data frame so WT is normalized to 1, and other columns are proportionally adjusted based on this normalization. To do this I grouped by the Gene column to ensure calculations are performed separately for each gene. The I adjusted each by dividing its values by the first WT value within the group.
+
+# Visualize the data 
+
+## Compare Protien/RNA data to orignal Western blot data
+
+### Original Protein Data
+
+![](`r here::here("Images", "Screenshot 1.png")`)
+
+**Figure 1** Bar graphs from Western blot data
+
+### Transformed Protein Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# convert data frames into tidyform
+Protein.2 <- Protein.2 %>%
+  pivot_longer(cols = WT:`KO+A`, names_to = "Group", values_to = "Value")
+
+# Reorder the X axis to be (WT, WT+A, KO, KO+A)
+Protein.2$Group <- factor(Protein.2$Group, levels = c("WT", "WT+A", "KO", "KO+A"))
+
+ggplot(Protein.2, aes(x = Gene, y = Value, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Gene Expression Across Conditions from Protein data", x = "Gene", y = "Value") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+### Transformed RNA Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# convert data frames into tidyform
+RNA_group1 <- RNA_group1 %>%
+  pivot_longer(cols = WT:`KO+A`, names_to = "Group", values_to = "Value")
+
+# Reorder the X axis to be (WT, WT+A, KO, KO+A)
+RNA_group1$Group <- factor(RNA_group1$Group, levels = c("WT", "WT+A", "KO", "KO+A"))
+
+ggplot(RNA_group1, aes(x = Gene, y = Value, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Gene Expression Across Conditions from RNA data", x = "Gene", y = "Value") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+**Based on the bar graphs above, the transformed protein data displays similar patterns to the original protein data, for example Hmox1, Cldn10, and Ace2 have very similar expression patterns to the original data. However there is some variance in the RNA data.**
+
+## Compare RNA/Protein data to orignal Psuedobulk data
+
+### Original RNA Data 
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# gene list
+gene_name2 <- c("Ace", "Hmox1", "Slc5a2")
+
+plots_f2 <- list()  # Initialize a list to store the plots
+
+for (i in gene_name2) {
+  if (i %in% colnames(Pseudobulk.group)) {
+    selected_column <- Pseudobulk.group[, i, drop = FALSE]
+    result_df2 <- data.frame(RowName = rownames(selected_column), Value = selected_column[, 1])
+    result_df2$RowName <- factor(result_df2$RowName, levels = c("Control Saline", "Control AngII", "PT ACE2 KO Saline", "PT ACE2 KO AngII"))
+
+    f2 <- ggplot(result_df2, aes(x = RowName, y = Value)) + 
+      geom_boxplot() + 
+      theme(axis.text.x = element_text(angle = 16, hjust = 1)) + 
+      labs(title = paste(i, "- Original RNA Data"), x = "Experimental Groups", y = "Expression")
+    
+    plots_f2[[i]] <- f2  # Store the plot in the list
+  }
+}
+```
+
+### Transformed RNA Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# make col names Gene and row names Group 
+RNA_group2 <- RNA_group1  %>% 
+  select("Gene", "Group", "Value") %>%
+  pivot_wider(names_from = Gene, values_from = Value) %>% 
+  column_to_rownames(var = "Group")
+
+plots_f3 <- list()  # Initialize a list to store the plots
+
+for (i in gene_name2) {
+  if (i %in% colnames(RNA_group2)) {
+    selected_column <- RNA_group2[, i, drop = FALSE]
+    result_df3 <- data.frame(RowName = rownames(selected_column), Value = selected_column[, 1])
+    result_df3$RowName <- factor(result_df3$RowName, levels = c("WT", "WT+A", "KO", "KO+A"))
+
+    f3 <- ggplot(result_df3, aes(x = RowName, y = Value)) + 
+      geom_boxplot() + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      labs(title = paste(i, "- Transformed RNA Data"), x = "Experimental Groups", y = "Expression")
+    
+    plots_f3[[i]] <- f3  # Store the plot in the list
+  }
+}
+```
+
+### Transformed Protein Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# make col names Gene and row names Group 
+Protein.3 <- Protein.2  %>% 
+  select("Gene", "Group", "Value") %>%
+  pivot_wider(names_from = Gene, values_from = Value) %>% 
+  column_to_rownames(var = "Group")
+
+plots_f4 <- list()  # Initialize a list to store the plots
+
+for (i in gene_name2) {
+  if (i %in% colnames(Protein.3)) {
+    selected_column <- Protein.3[, i, drop = FALSE]
+    result_df4 <- data.frame(RowName = rownames(selected_column), Value = selected_column[, 1])
+    result_df4$RowName <- factor(result_df4$RowName, levels = c("WT", "WT+A", "KO", "KO+A"))
+
+    f4 <- ggplot(result_df4, aes(x = RowName, y = Value)) + 
+      geom_boxplot() + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+      labs(title = paste(i, "- Transformed Protein Data"), x = "Experimental Groups", y = "Expression")
+    
+    plots_f4[[i]] <- f4  # Store the plot in the list
+  }
+}
+```
+
+### Box plots comparing the dataframes
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=5, fig.width = 12 }
+
+### Combine and Display the Plots Side by Side
+
+# Arrange plots for each gene side by side using cowplot's plot_grid
+plot_list <- list()
+for (i in gene_name2) {
+  plot_list[[i]] <- plot_grid(plots_f2[[i]], plots_f3[[i]], plots_f4[[i]], ncol = 3)
+}
+
+# Display the combined plots for each gene
+for (i in gene_name2) {
+  print(plot_list[[i]])
+}
+```
+
+**Based on the box plots above, the transformed RNA data displays similar patterns to the original NRA data. Ace, Hmox1, and, Slc5a2 have the same expression patterns to the original data. However there is some variance in the protein data.**
+
+## Scatter Plot
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# get rid of protein column in protein data
+Protein.2 <- Protein.2 %>%
+  select(Gene, Group, Value)
+
+# create Type column
+RNA_group1$Type <- "RNA"
+
+Protein.2$Type <- "Protein"
+
+# Merge RNA and Protein df
+combined_dataframe <- rbind(Protein.2, RNA_group1)
+
+# Reorder the X axis to be (WT, WT+A, KO, KO+A)
+combined_dataframe$Group <- factor(combined_dataframe$Group, levels = c("WT", "WT+A", "KO", "KO+A"))
+
+# scatter plot for Ace gene
+gene_of_interest <- "Ace"  
+subset_dataframe <- combined_dataframe[combined_dataframe$Gene == gene_of_interest, ]
+
+# Plot the data for the specific gene
+ggplot(subset_dataframe, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  coord_cartesian(ylim = c(0.3, 2.2)) +   
+  labs(title = paste("Scatter Plot of Value by Group and Type for", gene_of_interest), x = "Group", y = "Value")
+
+## Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+## not fixed axis
+#ggplot(combined_dataframe, aes(x = Group, y = Value, color = Type)) + 
+  #geom_point() + 
+  #theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  #facet_wrap(~Gene, scales = "free_y") +   
+  #labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+
+# Create a scatter plot the matches the values of the Gene and Group column but splits them so that the x axis is from protein and the Y axis is from RNA
+## Fixed axis
+ggplot(combined_dataframe, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.3, 2.2)) +   
+  labs(title = "Scatter Plot of Value by Group and Type", x = "Group", y = "Value")
+
+```
+
+## Basic Correlation 
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Create a new dataframe that creates new columns to have the values for RNA and Protein in the same row
+combined_dataframe2 <- combined_dataframe %>%
+  pivot_wider(names_from = Type, values_from = Value)
+
+# Create a new column if RNA is greater than 1
+combined_dataframe2$RNA_Greater_1 <- ifelse(combined_dataframe2$RNA > 1, "Yes", "No")
+combined_dataframe2$Protein_Greater_1 <- ifelse(combined_dataframe2$Protein > 1, "Yes", "No")
+
+#create a  column if RNA_Greater_1 and Protein_Greater_1 are the same value
+combined_dataframe2$Same <- ifelse(combined_dataframe2$RNA_Greater_1 == combined_dataframe2$Protein_Greater_1, "Yes", "No")
+
+# Count how many values are yes or no in the column Same
+combined_dataframe2 %>%
+  group_by(Same) %>%
+  summarise(Count = n())
+
+#combined_dataframe2 %>%
+  #group_by(Gene, Same) %>%
+  #summarise(Count = n())
+```
+
+**This table helps assess the correlation between RNA and protein expression levels. It takes into account whether RNA and protein levels are greater than 1, then counts how often these conditions match.**
+
+## Heat maps of the change within groups 
+
+### Transformed data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# create absolute value of difference
+abs_diff_df3 <- combined_dataframe %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(abs_diff = abs(RNA - Protein))
+
+#give column names + sum all deltas
+abs_diff_df3 <- abs_diff_df3 %>%
+  group_by(Gene) %>%
+  summarise(
+    abs_diff_wt = abs_diff[Group == "WT"],
+    abs_diff_ko = abs_diff[Group == "KO"],
+    abs_diff_wt_a = abs_diff[Group == "WT+A"],
+    abs_diff_ko_a = abs_diff[Group == "KO+A"]
+  ) %>%
+  mutate(sum_delta = abs_diff_wt + abs_diff_ko + abs_diff_wt_a+ abs_diff_ko_a)
+
+#same graph with fixed axis
+ggplot(combined_dataframe, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.3, 2.2)) +   
+  labs(title = "Scatter Plot of Value by Group and Type: Fixed Axis", x = "Group", y = "Value")
+```
+
+### WT vs KO
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# subset WT and KO delete once u figure out cor test
+combined_WT_KO <-subset(combined_dataframe, Group %in% c("WT", "KO"))
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_WT_KO <- combined_WT_KO %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(abs_diff = abs(RNA - Protein))
+
+#give column names + sum all deltas 
+abs_diff_WT_KO <- abs_diff_WT_KO %>%
+  group_by(Gene) %>%
+  summarise(
+    abs_diff_wt = abs_diff[Group == "WT"],
+    abs_diff_ko = abs_diff[Group == "KO"],
+  ) %>%
+  mutate(sum_delta = abs_diff_wt + abs_diff_ko)
+
+head(abs_diff_WT_KO)
+
+#same graph with fixed axis
+ggplot(combined_WT_KO, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0, 2)) +   
+  labs(title = "Scatter Plot of Value by Group and Type: WT vs KO", x = "Group", y = "Value")
+```
+
+### WT vs WT+A
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# subset WT and WT+A
+combined_WT_WTA <-subset(combined_dataframe, Group %in% c("WT", "WT+A"))
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_WT_WTA <- combined_WT_WTA %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(abs_diff = abs(RNA - Protein))
+
+
+#give column names + sum all deltas
+abs_diff_WT_WTA <- abs_diff_WT_WTA %>%
+  group_by(Gene) %>%
+  summarise(
+    abs_diff_wt = abs_diff[Group == "WT"],
+    abs_diff_wt_a = abs_diff[Group == "WT+A"],
+  ) %>% 
+  mutate(
+    sum_delta = abs_diff_wt + abs_diff_wt_a)
+
+head(abs_diff_WT_WTA)
+
+ggplot(combined_WT_WTA, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.4, 1.8)) +   
+  labs(title = "Scatter Plot of Value by Group and Type: WT vs WT+A", x = "Group", y = "Value")
+```
+
+### KO vs KO+A
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# subset KO and KO+A
+combined_KO_KOA <-subset(combined_dataframe, Group %in% c("KO", "KO+A"))
+
+# create separate columns for "WT" and "KO" values
+pivoted_KO_KOA <- combined_KO_KOA %>%
+  pivot_wider(names_from = Group, values_from = Value)
+
+# normalize KO to 1 
+pivoted_KO_KOA <- pivoted_KO_KOA %>%
+  group_by(Gene, Type) %>%
+  mutate(
+    `KO+A` = `KO+A` / KO[1],
+    KO = KO / KO[1],) %>%
+  ungroup()
+
+# recombine columns  
+combined_KO_KOA <- pivoted_KO_KOA %>%
+  pivot_longer(cols = c(KO, `KO+A`), names_to = "Group", values_to = "Value")
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_KO_KOA  <- combined_KO_KOA %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(abs_diff = abs(RNA - Protein))
+
+#give column names + sum all deltas
+abs_diff_KO_KOA <- abs_diff_KO_KOA %>%
+  group_by(Gene) %>%
+  summarise(
+    abs_diff_ko = abs_diff[Group == "KO"],
+    abs_diff_ko_a = abs_diff[Group == "KO+A"]
+  ) %>%
+  mutate(sum_delta = abs_diff_ko + abs_diff_ko_a)
+
+# round to 3 sig figs
+abs_diff_KO_KOA <- abs_diff_KO_KOA %>%
+  mutate_if(is.numeric, round, 3)
+
+head(abs_diff_KO_KOA)
+
+ggplot(combined_KO_KOA, aes(x = Group, y = Value, color = Type)) + 
+  geom_point() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  facet_wrap(~Gene, scales = "free_y") + 
+  coord_cartesian(ylim = c(0.4, 1.4)) +   
+  labs(title = "Scatter Plot of Value by Group and Type: KO vs KO+A", x = "Group", y = "Value")
+```
+
+### Heat maps 
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width = 8}
+
+abs_diff_KO_KOA$Metric <- "KO vs KO+A"
+abs_diff_WT_WTA$Metric <- "WT vs WT+A"
+abs_diff_df3$Metric <- "Transformed"
+abs_diff_WT_KO$Metric <- "WT vs WT+KO"
+
+abs_diff_hm_combined <- bind_rows(
+  mutate(abs_diff_KO_KOA, Metric = "KO vs KO+A"),
+  mutate(abs_diff_WT_WTA, Metric = "WT vs WT+A"),
+  mutate(abs_diff_WT_KO, Metric = "WT vs KO"),
+  mutate(abs_diff_df3, Metric = "Transformed")
+)
+
+# order metrics
+abs_diff_hm_combined$Metric <- factor(abs_diff_hm_combined$Metric, levels = c("Transformed", "WT vs KO", "WT vs WT+A", "KO vs KO+A"))
+
+# Create the heat map with facets
+ggplot(abs_diff_hm_combined, aes(x = Metric, y = Gene, fill = sum_delta)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 4) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines") # Space between facets
+  ) +
+  labs(
+    title = "Sum of |Delta| Heat Maps",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene/Protein",
+    fill = "|Delta|"
+  )
+```
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=6, fig.width = 10}
+
+# separate dynamic range for transformed data
+# Generate the shared dynamic range heat maps
+shared_dynamic_range_df <- bind_rows(
+  mutate(abs_diff_WT_KO, Metric = "WT vs KO"),
+  mutate(abs_diff_WT_WTA, Metric = "WT vs WT+A"),
+  mutate(abs_diff_KO_KOA, Metric = "KO vs KO+A")
+)
+
+# order metrics
+shared_dynamic_range_df$Metric <- factor(shared_dynamic_range_df$Metric, levels = c("Transformed", "WT vs KO", "WT vs WT+A", "KO vs KO+A"))
+
+# Generate the transformed heat map separately
+transformed_dynamic_range_df <- mutate(abs_diff_df3, Metric = "Transformed")
+
+# Common title for the plots
+common_title <- "Sum of |Delta| Heat Maps"
+
+# Plot the shared dynamic range heat maps
+shared_hm <- ggplot(shared_dynamic_range_df, aes(x = Metric, y = Gene, fill = sum_delta)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()      # Remove all grid marks
+  ) +
+  labs(
+    title = "",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Gene/Protein",
+    fill = "|Delta|"
+  ) +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 3)
+
+# Plot the transformed heat map
+transformed_hm <- ggplot(transformed_dynamic_range_df, aes(x = Metric, y = Gene, fill = sum_delta)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  coord_fixed(ratio = .3) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines"), # Space between facets
+    panel.grid = element_blank()      # Remove all grid marks
+  ) +
+  labs(
+    title = "",
+    x = "Transformed",   
+    y = "Gene/Protein",
+    fill = "|Delta|"
+  )
+
+# Arrange the heat maps side by side
+grid.arrange(transformed_hm, shared_hm, ncol = 2, top = common_title)
+```
+
+## Bar graph of Sum of |Delta| 
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Calculate the mean and standard error of the points
+hm_summary <- abs_diff_hm_combined %>%
+  group_by(Metric) %>%
+  summarize(
+    mean_sum_delta = mean(sum_delta),
+    SE = sd(sum_delta) / sqrt(n()))
+
+# Create the scatter plot with mean outlined as a bar graph + SE bars 
+ggplot(abs_diff_hm_combined, aes(x = Metric, y = sum_delta)) +
+  geom_jitter(width = 0.1, height = 0, alpha = 0.6) +  #  better visibility
+geom_errorbar(data = hm_summary, aes(x = factor(Metric), y = mean_sum_delta, ymin = mean_sum_delta - SE, ymax = mean_sum_delta + SE), width = 0.2, color = "black") +  # Standard error bars
+    geom_col(data = hm_summary, aes(y = mean_sum_delta), fill = NA, color = "black", size = 1) +  # Outline of bar for the mean
+  theme_minimal() +
+  labs(title = "Scatter Plot with Mean Outline and Standard Error Bars",
+       x = "Metric",
+       y = "Sum_Delta")
+
+# table of sum of sum_delta for each metric
+hm_sum <- abs_diff_hm_combined %>%
+  group_by(Metric) %>%
+  summarize(Sum = sum(sum_delta))
+
+# round to 3 sig figs
+hm_sum <- hm_sum %>%
+  mutate_if(is.numeric, round, 3)
+
+hm_sum
+```
+
+**The table above represents the sum of each of the delta values for each condition.**
+
+## T test 
+
+### WT/KO vs WT/WT+A
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+t_test_df_1 <- abs_diff_WT_KO %>%
+  merge(abs_diff_WT_WTA, by = "Gene")
+
+t_test <- t.test(t_test_df_1$sum_delta.x, t_test_df_1$sum_delta.y)
+t_test
+```
+
+### WT/WT+A vs KO/KO+A 
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+t_test_df_2 <- abs_diff_WT_WTA %>%
+  merge(abs_diff_KO_KOA, by = "Gene")
+
+t_test2 <- t.test(t_test_df_2$sum_delta.x, t_test_df_2$sum_delta.y)
+t_test2
+```
+
+### WT/KO vs KO/KO+A
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+t_test_df_3 <- abs_diff_WT_KO %>%
+  merge(abs_diff_KO_KOA, by = "Gene")
+
+t_test3 <- t.test(t_test_df_3$sum_delta.x, t_test_df_3$sum_delta.y)
+t_test3
+```
+
+## Ratio between the mean absolute values of the differnce in AngII groups and the  differnce in the KO group
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Calculate the absolute difference between RNA and Protein values
+abs_diff_df <- combined_dataframe %>%
+  pivot_wider(names_from = Type, values_from = Value) %>%
+  mutate(abs_diff = abs(RNA - Protein))
+
+# Calculate the mean absolute difference for "wt+a" and "ko+a" groups separately for each gene
+#make new column that represents the average of the wt+a and ko+a conditions (mean_a)
+#make new column that represents the ratio between the mean_a and ko conditions (ratio)
+abs_diff_df2 <- abs_diff_df %>%
+  group_by(Gene) %>%
+  summarise(
+    abs_diff_wt = abs_diff[Group == "WT"],
+    abs_diff_ko = abs_diff[Group == "KO"],
+    abs_diff_wt_a = abs_diff[Group == "WT+A"],
+    abs_diff_ko_a = abs_diff[Group == "KO+A"]
+  ) %>%
+  mutate(mean_a = (abs_diff_ko_a + abs_diff_wt_a) /2) %>%
+  mutate(ratio = mean_a/abs_diff_ko) 
+
+# arrange so the df is in order of descending log_ratio
+abs_diff_df2 <- abs_diff_df2 %>%
+  mutate(log_ratio = log10(ratio)) %>%  
+  arrange(desc(log_ratio)) %>%   
+  mutate(Gene = factor(Gene, levels = unique(Gene)))   
+
+# Plot with genes in descending order by log_ratio
+ggplot(abs_diff_df2, aes(x = Gene, y = ratio)) +
+  geom_bar(stat = "identity", fill = "navy") +  
+  scale_y_log10() +
+  labs(title = "Ratio of AngII Conditions and the KO Condition",
+       x = "Gene/Protein",
+       y = "Ratio: ((WT+A)+ (KO+A)/ KO)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+# Save as RDS
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE, fig.height=8, fig.width = 10}
+
+saveRDS(abs_diff_hm_combined, "RNA_Protein.RDS")
+```
+
+# Session Info
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+sessionInfo()
+```
