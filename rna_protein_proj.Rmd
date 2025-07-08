@@ -1,0 +1,146 @@
+---
+title: "rna-protein manuscript"
+author: "Sienna Blanche"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: true
+    number_sections: no
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("viridis")) {install.packages("viridis"); require("viridis")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+
+
+here()
+```
+
+# Load Data
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+#Load the RPC dataset
+RPC <- readRDS(here("Dataset", "RNA-Protein.rds"))
+
+# load FCG dataset
+FCG <- readRDS(here("Dataset", "FCG.RDS"))
+
+```
+
+# RPC 
+
+## RPC Heatmaps
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Create the heat map with facets
+ggplot(RPC %>% filter(Metric != "Transformed"), aes(x = Metric, y = Gene, fill = sum_delta)) +
+  geom_tile() +
+  scale_fill_viridis(option = "magma") +
+  scale_y_discrete(limits = rev) +  
+  facet_wrap(~ Metric, scales = "free_x", ncol = 3) +  # Line up metrics horizontally
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),    # Remove x-axis text
+    axis.ticks.x = element_blank(),   # Remove x-axis ticks
+    strip.text = element_text(size = 12, angle = 0),  # Adjust facet label size and angle if needed
+    panel.spacing = unit(1, "lines") # Space between facets
+  ) +
+  labs(
+    title = "Sum of |Delta| Heat Maps",
+    x = "",  # Remove x-axis label as it is redundant
+    y = "Target",
+    fill = "|Delta|"
+  )
+```
+
+# RPC +FCG
+
+## Merge dataframes
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+merged_df <- full_join(RPC, FCG, by = "Gene")
+```
+
+## Assessing Correlation
+
+### WT/KO vs M/F
+
+#### Correlation Coeffiecent 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# filter dfs
+filtered_WT_MXY <- merged_df %>% 
+  filter(Metric.y == "MXY vs FXX", Metric.x == "WT vs KO")
+
+## spearman
+cor_result_spearman_WT_MXY <- cor.test(filtered_WT_MXY$abs_diff_ko, filtered_WT_MXY$`Sum Deltas`, method = "spearman")
+
+corr_coeff_spearman_WT_MXY <- cor_result_spearman_WT_MXY$estimate
+corr_pvalue_spearman_WT_MXY <- cor_result_spearman_WT_MXY$p.value
+
+## pearson
+cor_result_pearson_WT_MXY <- cor.test(filtered_WT_MXY$abs_diff_ko, filtered_WT_MXY$`Sum Deltas`, method = "pearson")
+
+corr_coeff_pearson_WT_MXY <- cor_result_pearson_WT_MXY$estimate
+corr_pvalue_pearson_WT_MXY <- cor_result_pearson_WT_MXY$p.value
+```
+
+#### Visualizing Correlation 
+
+```{r echo=TRUE, error=FALSE, message=FALSE, warning=FALSE, fig.width= 15, fig.height = 8, fig.align = 'center'}
+
+# spearman plot
+ggplot(filtered_WT_MXY,aes(x = abs_diff_ko, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ M v F",
+    y = "Δ WT v KO",
+    title = "Spearman's Correlation between the change in WT v KO and M v F"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXY$abs_diff_ko, na.rm = TRUE), 
+           y = min(filtered_WT_MXY$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_spearman_WT_MXY, 2), "\n", "p-value =", round(corr_pvalue_spearman_WT_MXY, 2)),
+           hjust = 1, vjust = -8, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+
+# pearson plot
+ggplot(filtered_WT_MXY,aes(x = abs_diff_ko, y = `Sum Deltas`)) +
+  geom_point() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 2, colour = "black"),
+        text = element_text(size=20)) +
+  labs(
+    x = "Δ M v F",
+    y = "Δ WT v KO",
+    title = "Pearson's Correlation between the change in WT v KO and M v F"
+  ) +
+  annotate("text", 
+           x = max(filtered_WT_MXY$abs_diff_ko, na.rm = TRUE), 
+           y = min(filtered_WT_MXY$`Sum Deltas`, na.rm = TRUE),
+           label = paste("Correlation coefficient =", round(corr_coeff_pearson_WT_MXY, 2), "\n", "p-value =", round(corr_pvalue_pearson_WT_MXY, 2)),
+           hjust = 1, vjust = -8, size = 6
+           ) +
+    geom_text_repel(aes(label = Gene), vjust = -0.5, size = 5) 
+```
