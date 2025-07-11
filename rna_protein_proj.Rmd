@@ -115,6 +115,51 @@ for (i in metrics) {
 }
 ```
 
+### version 3
+
+```{r, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+# Loop for hm
+for (i in metrics) {
+  RPC_subset <- RPC %>%
+    filter(Metric == i) %>%
+    mutate(Gene = factor(Gene, levels = rev(unique(Gene))))
+
+  p1 <- ggplot(RPC_subset, aes(x = Metric, y = Gene, fill = sum_delta)) +
+    geom_tile(width = 0.1, height = 1) +
+    geom_segment(
+      aes(x = 0.4, xend = 0.5, y = as.numeric(Gene), yend = as.numeric(Gene)),
+      inherit.aes = FALSE,
+      color = "gray",
+      linewidth = 0.5
+    ) +
+    scale_fill_viridis(
+      option = "magma", 
+      limits = c(0, 1.1), 
+      breaks = c(0, 0.5, 1)
+      ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.text.y = element_text(size = 14, face = "bold"),
+      axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 5)),
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, face = "bold"),
+      legend.text = element_text(size = 12),
+      panel.grid.major = element_blank()
+    ) +
+    labs(
+      title = paste("Heat Map of |Delta|:", i),
+      x = "",
+      y = "Target",
+      fill = "|Delta|"
+    )
+  
+  print(p1)
+}
+```
+
 ## Assessing Correlation
 
 ### WT/KO vs VEH/ANGII
